@@ -463,89 +463,133 @@
   function clearHash() { if (location.hash) history.replaceState(null, '', location.pathname + location.search); }
   const chartLink = d => APP_URL + '#c=' + encodeChart(d);
 
-  // ---------- summary ----------
-  function summary(d, c) {
+  // ---------- plain-language summary (for people who don't know Ba Zi) ----------
+  const DIRF = { 'С':'север','СВ':'северо-восток','В':'восток','ЮВ':'юго-восток','Ю':'юг','ЮЗ':'юго-запад','З':'запад','СЗ':'северо-запад' };
+  const EL_GEN = ['Дерева', 'Огня', 'Земли', 'Металла', 'Воды'];
+  const lc = t => t.charAt(0).toLowerCase() + t.slice(1);
+  const DIR_MEAN = ['успех и деньги', 'здоровье', 'отношения и семья', 'спокойствие и ясность ума'];
+  const STRENGTH_PLAIN = {
+    strong: 'Энергии в карте много. Вам полезно её тратить: действовать, брать ответственность, зарабатывать, а не копить в себе.',
+    weak: 'Энергии в карте меньше, чем нагрузки. Вам полезны поддержка, учёба, отдых и надёжная команда рядом.',
+    balanced: 'Энергия в карте уравновешена. Полезно добавлять то, чего меньше всего, и не перегибать в самое сильное.',
+  };
+  function plainFacts(d, c) {
     const dm = c.dm, ageNow = (Date.now() - c.utcMs) / (365.2425 * 864e5);
+    const tot = c.score.reduce((a, b) => a + b, 0);
+    const order = c.score.map((v, e) => [v, e]).sort((a, b) => b[0] - a[0]);
+    const kua = B.kua(c.solarYear, d.gender);
+    const nowY = B.currentSolarYear(Date.now());
+    return {
+      dm, el: `${B.isYang(dm) ? 'Ян' : 'Инь'}-${B.ELEMENTS[B.stemEl(dm)]}`, img: T.dayMaster[dm].img.toLowerCase(),
+      trait: T.dayMaster[dm].text, shadow: T.dayMaster[dm].shadow, short: T.dayMaster[dm].short,
+      most: order[0][1], least: order[4][1], pct: e => Math.round(c.score[e] / tot * 100),
+      fav: c.favorable, cur: c.luck.find(l => ageNow >= l.age && ageNow < l.age + 10),
+      kua, dirs: B.KUA_DIRS[kua], east: [1, 3, 4, 9].includes(kua), nowY, yp: B.yearPillar(nowY),
+      animal: B.ANIMALS[c.pillars[3].p.branch],
+    };
+  }
+  function summary(d, c) {
+    const f = plainFacts(d, c), G = g => T.tenGods[B.tenGod(f.dm, g)];
     const pil = c.pillars.slice().reverse().map(x => x.p ? B.STEMS[x.p.stem] + B.BRANCHES[x.p.branch] : '??');
-    const cur = c.luck.find(l => ageNow >= l.age && ageNow < l.age + 10);
-    const kua = B.kua(c.solarYear, d.gender), dirs = B.KUA_DIRS[kua];
-    const DIRF = { 'С':'север','СВ':'северо-восток','В':'восток','ЮВ':'юго-восток','Ю':'юг','ЮЗ':'юго-запад','З':'запад','СЗ':'северо-запад' };
-    const nowY = B.currentSolarYear(Date.now()), yp = B.yearPillar(nowY);
+    const favColors = f.fav.slice(0, 2).map(e => T.elements[e].colors).join(', ');
+    const favCareer = f.fav.slice(0, 2).map(e => T.elements[e].career).join('; ');
     const lines = [
-      `Ба Цзы${d.name ? ': ' + d.name : ''}`,
-      `${d.date.split('-').reverse().join('.')}${d.timeUnknown ? ', время неизвестно' : ', ' + d.time}, ${d.place.name}`,
+      `${d.name ? d.name + ': к' : 'К'}итайский гороскоп Ба Цзы`,
+      `Родились ${d.date.split('-').reverse().join('.')}${d.timeUnknown ? '' : ' в ' + d.time}, ${d.place.name}`,
       '',
-      `Столпы (год · месяц · день · час): ${pil.join(' · ')}`,
-      `Господин дня: ${B.STEMS[dm]} ${B.isYang(dm) ? 'Ян' : 'Инь'}-${B.ELEMENTS[B.stemEl(dm)]} (${T.dayMaster[dm].img.toLowerCase()})`,
-      `${T.strength[c.strength].title}. Полезные стихии: ${c.favorable.map(e => B.ELEMENTS[e]).join(', ')}`,
-      `Знак года: ${B.ANIMALS[c.pillars[3].p.branch]}`,
-      cur ? `Текущий такт удачи: ${B.STEMS[cur.p.stem]}${B.BRANCHES[cur.p.branch]}, ${T.tenGods[B.tenGod(dm, cur.p.stem)].ru} (${Math.floor(cur.age)}–${Math.floor(cur.age) + 9} лет)` : '',
-      `${nowY} год ${B.STEMS[yp.stem]}${B.BRANCHES[yp.branch]}: ${T.tenGods[B.tenGod(dm, yp.stem)].ru}`,
+      'Что это: Ба Цзы («восемь знаков») — китайская система, которая по дате и часу рождения описывает характер, сильные стороны и удачные периоды жизни. Всё в ней строится на пяти стихиях: Дерево, Огонь, Земля, Металл, Вода.',
       '',
-      `Фэншуй: число Гуа ${kua}, ${[1,3,4,9].includes(kua) ? 'восточная' : 'западная'} группа`,
-      `Лучшие направления: ${dirs.slice(0, 4).map(x => DIRF[x]).join(', ')}`,
-      `Худшее: ${DIRF[dirs[7]]}`,
-    ].filter((x, i, a) => x !== '' || a[i - 1] !== '');
-    return lines.join('\n');
+      `ВАША СТИХИЯ: ${f.el}, образ «${f.img}».`,
+      `Характер: ${lc(f.trait)}`,
+      `Над чем работать: ${lc(f.shadow)}`,
+      `Знак по китайскому гороскопу: ${f.animal}.`,
+      '',
+      'БАЛАНС СТИХИЙ',
+      `Больше всего в карте ${EL_GEN[f.most]} (${f.pct(f.most)}%), меньше всего ${EL_GEN[f.least]} (${f.pct(f.least)}%).`,
+      STRENGTH_PLAIN[c.strength],
+      `Что вам помогает: ${f.fav.map(e => B.ELEMENTS[e]).join(', ')}. В одежде и интерьере это цвета: ${favColors}.`,
+      `Подходящие сферы: ${favCareer}.`,
+      '',
+      'ПЕРИОДЫ ЖИЗНИ',
+      f.cur ? `Сейчас идёт ваш 10-летний период (с ${Math.floor(f.cur.age)} до ${Math.floor(f.cur.age) + 9} лет). Его тема: ${lc(G(f.cur.p.stem).text)}` : '',
+      `${f.nowY} год для вас: ${lc(G(f.yp.stem).text)}`,
+      '',
+      'ФЭНШУЙ (как расставить мебель)',
+      `Ваши удачные стороны света: ${f.dirs.slice(0, 4).map((x, i) => `${DIRF[x]} (${DIR_MEAN[i]})`).join(', ')}.`,
+      `За рабочим столом сидите лицом на ${DIRF[f.dirs[0]]}, спите головой на ${DIRF[f.dirs[1]]}. Неудачная сторона: ${DIRF[f.dirs[7]]}.`,
+      '',
+      `Запись карты для знатоков: ${pil.join(' ')} (год, месяц, день, час)`,
+      'Это традиционная китайская система, а не наука: повод задуматься, а не руководство к действию.',
+    ].filter((x, i, a) => !(x === '' && a[i - 1] === ''));
+    return lines.filter(x => x !== null).join('\n').replace(/\n{3,}/g, '\n\n');
   }
 
   // ---------- image card ----------
+  function wrapLines(x, text, maxW) {
+    const words = text.split(' '), out = []; let line = '';
+    for (const w of words) { const t = line ? line + ' ' + w : w; if (x.measureText(t).width > maxW && line) { out.push(line); line = w; } else line = t; }
+    if (line) out.push(line); return out;
+  }
   async function renderCard(d, c) {
-    const W = 1080, H = 1350, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const W = 1080, cv = document.createElement('canvas'); cv.width = W; cv.height = 2400;
     const x = cv.getContext('2d');
-    try { await Promise.all(['500 80px "Noto Serif SC"', '700 60px Alegreya', '400 30px "Golos Text"', '600 30px "Golos Text"'].map(f => document.fonts.load(f, f.includes('SC') ? '甲子' : 'Аа'))); } catch (e) {}
-    const C = { bg: '#eef0ea', card: '#fbfbf8', fg: '#1d2421', muted: '#5f6a64', line: '#d7dbd2', accent: '#a8322a', el: ['#2f7d4f', '#c13a28', '#9a7428', '#6c7480', '#245a8c'] };
+    try { await Promise.all(['500 80px "Noto Serif SC"', '700 60px Alegreya', '400 30px "Golos Text"', '600 30px "Golos Text"'].map(fn => document.fonts.load(fn, fn.includes('SC') ? '甲子' : 'Аа'))); } catch (e) {}
+    const C = { bg: '#eef0ea', card: '#fbfbf8', fg: '#1d2421', muted: '#5f6a64', line: '#d7dbd2', accent: '#a8322a', good: '#e2efe5', el: ['#2f7d4f', '#c13a28', '#9a7428', '#6c7480', '#245a8c'] };
     const HAN = '"Noto Serif SC", "Songti SC", "Noto Serif CJK SC", serif', DISP = 'Alegreya, Georgia, serif', BODY = '"Golos Text", -apple-system, Roboto, sans-serif';
-    x.fillStyle = C.bg; x.fillRect(0, 0, W, H);
-    x.fillStyle = C.accent; x.fillRect(0, 0, W, 14);
-    x.fillStyle = C.fg; x.font = `700 64px ${DISP}`; x.textBaseline = 'alphabetic';
-    x.fillText(d.name || 'Карта Ба Цзы', 70, 130);
-    x.fillStyle = C.muted; x.font = `400 32px ${BODY}`;
-    x.fillText(`${d.date.split('-').reverse().join('.')}${d.timeUnknown ? ', время неизвестно' : ', ' + d.time} · ${d.place.name}`, 70, 182);
-    // pillars
-    const cols = c.pillars, cw = 220, gap = 20, x0 = (W - (cw * 4 + gap * 3)) / 2, y0 = 230;
+    const L = 70, MW = W - 2 * L, f = plainFacts(d, c);
+    const para = (text, font, color, lh, y) => { x.font = font; x.fillStyle = color; wrapLines(x, text, MW).forEach((ln, i) => x.fillText(ln, L, y + i * lh)); return y + wrapLines(x, text, MW).length * lh; };
+    const head = (text, y) => { x.font = `600 24px ${BODY}`; x.fillStyle = C.accent; x.fillText(text.toUpperCase(), L, y); return y + 46; };
+    x.fillStyle = C.bg; x.fillRect(0, 0, W, cv.height);
+    x.textBaseline = 'alphabetic';
+    let y = 120;
+    x.fillStyle = C.fg; x.font = `700 62px ${DISP}`; x.fillText(d.name || 'Китайский гороскоп', L, y);
+    y = para(`Китайский гороскоп Ба Цзы · ${d.date.split('-').reverse().join('.')}${d.timeUnknown ? '' : ', ' + d.time} · ${d.place.name}`, `400 30px ${BODY}`, C.muted, 40, y + 52);
+    y = para('Ба Цзы описывает характер по дате и часу рождения. Ниже четыре пары иероглифов: знаки года, месяца, дня и часа. Цвет иероглифа показывает одну из пяти стихий.', `400 27px ${BODY}`, C.fg, 38, y + 22);
+    // pillars: year → hour, left to right (reading order for a beginner)
+    const cols = c.pillars.slice().reverse(), cw = 220, gap = 20, x0 = (W - (cw * 4 + gap * 3)) / 2, y0 = y + 24, ch = 440;
     cols.forEach(({ key, label, p }, i) => {
       const cx = x0 + i * (cw + gap);
-      x.fillStyle = C.card; roundRect(x, cx, y0, cw, 470, 24); x.fill();
-      if (key === 'day') { x.strokeStyle = C.accent; x.lineWidth = 5; roundRect(x, cx, y0, cw, 470, 24); x.stroke(); }
-      x.textAlign = 'center'; x.fillStyle = C.muted; x.font = `600 26px ${BODY}`;
-      x.fillText(label.toUpperCase(), cx + cw / 2, y0 + 50);
-      if (!p) { x.fillStyle = C.line; x.font = `400 120px ${DISP}`; x.fillText('?', cx + cw / 2, y0 + 300); return; }
-      x.fillStyle = C.fg; x.font = `400 24px ${BODY}`;
-      const lab = key === 'day' ? 'Господин дня' : T.tenGods[B.tenGod(c.dm, p.stem)].ru;
-      for (let fs = 24; fs > 15 && x.measureText(lab).width > cw - 20; fs--) x.font = `400 ${fs - 1}px ${BODY}`;
-      x.fillText(lab, cx + cw / 2, y0 + 92);
-      x.font = `500 136px ${HAN}`;
-      x.fillStyle = C.el[B.stemEl(p.stem)]; x.fillText(B.STEMS[p.stem], cx + cw / 2, y0 + 245);
-      x.fillStyle = C.el[B.BRANCH_EL[p.branch]]; x.fillText(B.BRANCHES[p.branch], cx + cw / 2, y0 + 405);
-      x.fillStyle = C.muted; x.font = `400 24px ${BODY}`;
-      x.fillText(B.ANIMALS[p.branch], cx + cw / 2, y0 + 448);
+      x.fillStyle = C.card; roundRect(x, cx, y0, cw, ch, 24); x.fill();
+      if (key === 'day') { x.strokeStyle = C.accent; x.lineWidth = 5; roundRect(x, cx, y0, cw, ch, 24); x.stroke(); }
+      x.textAlign = 'center'; x.fillStyle = key === 'day' ? C.accent : C.muted; x.font = `600 25px ${BODY}`;
+      x.fillText(key === 'day' ? 'ДЕНЬ · ЭТО ВЫ' : label.toUpperCase(), cx + cw / 2, y0 + 46);
+      if (!p) { x.fillStyle = C.line; x.font = `400 110px ${DISP}`; x.fillText('?', cx + cw / 2, y0 + 250); x.fillStyle = C.muted; x.font = `400 22px ${BODY}`; x.fillText('время неизвестно', cx + cw / 2, y0 + 400); x.textAlign = 'left'; return; }
+      x.font = `500 128px ${HAN}`;
+      x.fillStyle = C.el[B.stemEl(p.stem)]; x.fillText(B.STEMS[p.stem], cx + cw / 2, y0 + 190);
+      x.fillStyle = C.el[B.BRANCH_EL[p.branch]]; x.fillText(B.BRANCHES[p.branch], cx + cw / 2, y0 + 340);
+      x.fillStyle = C.fg; x.font = `400 22px ${BODY}`;
+      const e1 = B.stemEl(p.stem), e2 = B.BRANCH_EL[p.branch];
+      x.fillText(e1 === e2 ? B.ELEMENTS[e1] : `${B.ELEMENTS[e1]} + ${B.ELEMENTS[e2]}`, cx + cw / 2, y0 + 384);
+      x.fillStyle = C.muted; x.fillText(B.ANIMALS[p.branch], cx + cw / 2, y0 + 416);
+      x.textAlign = 'left';
     });
-    x.textAlign = 'left';
-    // day master + elements
-    let y = 780; const dm = c.dm;
-    x.fillStyle = C.fg; x.font = `700 44px ${DISP}`;
-    x.fillText(`${B.isYang(dm) ? 'Ян' : 'Инь'}-${B.ELEMENTS[B.stemEl(dm)]}: ${T.dayMaster[dm].img.toLowerCase()}`, 70, y);
-    x.fillStyle = C.muted; x.font = `400 30px ${BODY}`;
-    x.fillText(`${T.strength[c.strength].title}. Полезно: ${c.favorable.map(e => B.ELEMENTS[e].toLowerCase()).join(', ')}`, 70, y + 50);
+    y = y0 + ch + 80;
+    y = head('Ваша стихия', y);
+    x.fillStyle = C.fg; x.font = `700 46px ${DISP}`; x.fillText(`${f.el}: «${f.img}»`, L, y); y += 52;
+    y = para(f.short, `400 30px ${BODY}`, C.fg, 42, y);
+    y = para(`Знак по китайскому гороскопу: ${f.animal}.`, `400 28px ${BODY}`, C.muted, 40, y + 4);
+    y += 50; y = head('Сколько каждой стихии в карте', y);
     const tot = c.score.reduce((a, b) => a + b, 0), mx = Math.max(...c.score);
     c.score.forEach((v, e) => {
-      const by = 880 + e * 52;
-      x.fillStyle = C.fg; x.font = `400 28px ${BODY}`; x.fillText(B.ELEMENTS[e], 70, by + 24);
-      x.fillStyle = C.line; roundRect(x, 260, by, 640, 26, 13); x.fill();
-      x.fillStyle = C.el[e]; roundRect(x, 260, by, Math.max(26, 640 * v / mx), 26, 13); x.fill();
-      x.fillStyle = C.muted; x.textAlign = 'right'; x.fillText(Math.round(v / tot * 100) + '%', 1010, by + 24); x.textAlign = 'left';
+      const by = y - 22 + e * 50;
+      x.fillStyle = C.fg; x.font = `400 28px ${BODY}`; x.fillText(B.ELEMENTS[e], L, by + 22);
+      x.fillStyle = C.line; roundRect(x, 260, by, 640, 24, 12); x.fill();
+      x.fillStyle = C.el[e]; roundRect(x, 260, by, Math.max(24, 640 * v / mx), 24, 12); x.fill();
+      x.fillStyle = C.muted; x.textAlign = 'right'; x.fillText(Math.round(v / tot * 100) + '%', W - L, by + 22); x.textAlign = 'left';
     });
-    // kua
-    const kua = B.kua(c.solarYear, d.gender), dirs = B.KUA_DIRS[kua];
-    y = 1180;
-    x.fillStyle = C.accent; x.beginPath(); x.arc(115, y, 45, 0, Math.PI * 2); x.fill();
-    x.fillStyle = '#fff'; x.font = `700 54px ${DISP}`; x.textAlign = 'center'; x.fillText(String(kua), 115, y + 18); x.textAlign = 'left';
-    x.fillStyle = C.fg; x.font = `600 32px ${BODY}`; x.fillText(`Число Гуа ${kua}, ${[1,3,4,9].includes(kua) ? 'восточная' : 'западная'} группа`, 185, y - 8);
-    x.fillStyle = C.muted; x.font = `400 28px ${BODY}`; x.fillText(`Лучшие направления: ${dirs.slice(0, 4).join(', ')}`, 185, y + 34);
+    y += 5 * 50 + 10;
+    y = para(`Что вам помогает: ${f.fav.map(e => B.ELEMENTS[e].toLowerCase()).join(', ')}. Цвета: ${f.fav.slice(0, 2).map(e => T.elements[e].colors).join(', ')}.`, `400 28px ${BODY}`, C.fg, 40, y);
+    y += 50; y = head('Фэншуй: удачные стороны света', y);
+    y = para(f.dirs.slice(0, 4).map((dd, i) => `${DIRF[dd]}: ${DIR_MEAN[i]}`).join(' · '), `400 28px ${BODY}`, C.fg, 40, y);
+    y = para(`Садитесь за стол лицом на ${DIRF[f.dirs[0]]}, спите головой на ${DIRF[f.dirs[1]]}.`, `400 28px ${BODY}`, C.muted, 40, y + 4);
+    y += 40;
+    x.fillStyle = C.line; x.fillRect(L, y, MW, 2); y += 50;
     x.fillStyle = C.muted; x.font = `400 24px ${BODY}`;
-    x.fillText(HOSTED ? APP_URL.replace(/^https?:\/\//, '') : 'Ба Цзы и фэншуй', 70, H - 40);
-    return new Promise(r => cv.toBlob(r, 'image/png'));
+    x.fillText(HOSTED ? 'Подробнее и свой расчёт: ' + APP_URL.replace(/^https?:\/\//, '') : 'Ба Цзы и фэншуй', L, y);
+    const out = document.createElement('canvas'); out.width = W; out.height = y + 50;
+    const ox = out.getContext('2d'); ox.drawImage(cv, 0, 0);
+    ox.fillStyle = C.accent; ox.fillRect(0, 0, W, 14);
+    return new Promise(r => out.toBlob(r, 'image/png'));
   }
   function roundRect(x, a, b, w, h, r) { x.beginPath(); x.moveTo(a + r, b); x.arcTo(a + w, b, a + w, b + h, r); x.arcTo(a + w, b + h, a, b + h, r); x.arcTo(a, b + h, a, b, r); x.arcTo(a, b, a + w, b, r); x.closePath(); }
 
@@ -560,7 +604,7 @@
     const status = $('#shStatus'), say = t => { if (status) status.textContent = t; };
     const link = HOSTED ? chartLink(d) : '';
     const text = summary(d, c);
-    const full = link ? text + '\n\nПолная карта: ' + link : text;
+    const full = link ? text + '\n\nПолная карта и свой расчёт: ' + link : text;
     const tg = $('#shTg');
     if (tg) {
       if (link) tg.href = 'https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent(text);
@@ -573,7 +617,7 @@
     });
     $('#shText').addEventListener('click', async () => {
       if (navigator.share) {
-        try { await navigator.share(link ? { title: 'Ба Цзы', text: text + '\n\nПолная карта:', url: link } : { title: 'Ба Цзы', text }); say(''); return; }
+        try { await navigator.share(link ? { title: 'Ба Цзы', text: text + '\n\nПолная карта и свой расчёт:', url: link } : { title: 'Ба Цзы', text }); say(''); return; }
         catch (e) { if (e && e.name === 'AbortError') return; }
       }
       say(await copyText(full) ? 'Текст скопирован. Вставьте его в чат.' : 'Не удалось скопировать.');
@@ -585,7 +629,7 @@
       if (!blob) { say('Не удалось создать картинку.'); return; }
       const file = new File([blob], `bazi-${d.date}.png`, { type: 'image/png' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        try { await navigator.share(link ? { files: [file], text: 'Моя карта Ба Цзы: ' + link } : { files: [file] }); say(''); return; }
+        try { await navigator.share(link ? { files: [file], text: 'Мой китайский гороскоп Ба Цзы. Свой можно рассчитать здесь: ' + link } : { files: [file] }); say(''); return; }
         catch (e) { if (e && e.name === 'AbortError') { say(''); return; } }
       }
       const url = URL.createObjectURL(blob);
