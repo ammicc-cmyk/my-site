@@ -67,8 +67,8 @@
       body = `
         <h2>Место рождения</h2>
         <p class="hint">Город нужен для часового пояса того времени (включая летнее и декретное время) и долготы. По долготе вычисляется истинное солнечное время: в Ба Цзы час определяется по Солнцу, а не по часам.</p>
-        <label class="field"><span>Город</span><input id="city" type="search" autocomplete="off" placeholder="Начните вводить название" value="${p && !p.manual ? esc(p.name) : ''}"></label>
-        <div id="results" class="results" role="listbox"></div>
+        <label class="field"><span>Город</span><input id="city" type="search" autocomplete="off" placeholder="Например, Казань" value="${p && !p.manual ? esc(p.name) : ''}"></label>
+        <div id="results" class="results" role="listbox">${p ? '' : popular()}</div>
         ${p ? `<div class="picked">Выбрано: <b>${esc(p.name)}</b>${p.country ? ', ' + esc(p.country) : ''} · ${p.lon.toFixed(2)}° в.д. · ${p.tz ? esc(p.tz) : 'UTC' + (p.offset >= 0 ? '+' : '') + p.offset}</div>` : ''}
         <details class="manual" ${p && p.manual ? 'open' : ''}><summary>Указать координаты вручную</summary>
           <div class="grid2">
@@ -119,6 +119,7 @@
     on('#time', 'input', e => { d.time = e.target.value; refreshNext(); });
     on('#tu', 'change', e => { d.timeUnknown = e.target.checked; renderWizard(); });
     on('#city', 'input', e => searchCity(e.target.value));
+    if ($('#results')) bindPopular($('#results'));
     on('#mset', 'click', () => {
       const lon = parseFloat($('#mlon').value), off = parseFloat($('#moff').value);
       if (isNaN(lon) || lon < -180 || lon > 180 || isNaN(off) || off < -12 || off > 14) { $('#mset').textContent = 'Проверьте значения'; return; }
@@ -128,28 +129,40 @@
     if (first && state.step > 0 && !first.value) setTimeout(() => first.focus({ preventScroll: true }), 50);
   }
 
+  const norm = t => t.toLowerCase().replace(/ё/g, 'е');
+  const POPULAR = ['Москва', 'Санкт-Петербург', 'Новосибирск', 'Екатеринбург', 'Казань', 'Нижний Новгород', 'Краснодар', 'Самара'];
+  const popular = () => `<div class="chips">${POPULAR.map(n => `<button class="pchip" data-city="${esc(n)}">${esc(n)}</button>`).join('')}</div>
+    <div class="tiny muted">В списке ${window.BZ_CITIES.length} городов России: все областные центры и крупные города.</div>`;
+  function bindPopular(box) {
+    box.querySelectorAll('[data-city]').forEach(b => b.addEventListener('click', () => {
+      const c = window.BZ_CITIES.find(x => x[0] === b.dataset.city);
+      state.data.place = { name: c[0], country: c[1], lat: c[2], lon: c[3], tz: c[4] }; renderWizard();
+    }));
+  }
   let searchSeq = 0;
   function searchCity(q) {
     const box = $('#results'); q = q.trim().toLowerCase();
-    if (q.length < 2) { box.innerHTML = ''; return; }
-    const local = window.BZ_CITIES.filter(c => c[0].toLowerCase().startsWith(q)).slice(0, 6)
-      .map(c => ({ name: c[0], country: c[1], lat: c[2], lon: c[3], tz: c[4] }));
+    if (q.length < 2) { box.innerHTML = popular(); bindPopular(box); return; }
+    const nq = norm(q);
+    const rank = c => { const n = norm(c[0]); return n.startsWith(nq) ? 0 : n.split(/[\s-]+/).some(w => w.startsWith(nq)) ? 1 : norm(c[1]).includes(nq) ? 2 : 9; };
+    const local = window.BZ_CITIES.map(c => [rank(c), c]).filter(x => x[0] < 9).sort((a, b) => a[0] - b[0] || a[1][0].localeCompare(b[1][0], 'ru'))
+      .slice(0, 8).map(([, c]) => ({ name: c[0], country: c[1], lat: c[2], lon: c[3], tz: c[4] }));
     paint(local, true);
     const seq = ++searchSeq;
     clearTimeout(searchCity.t);
     searchCity.t = setTimeout(() => {
-      fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=8&language=ru&format=json`)
+      fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=10&language=ru&countryCode=RU&format=json`)
         .then(r => r.json()).then(j => {
           if (seq !== searchSeq) return;
-          const remote = (j.results || []).filter(r => r.timezone).map(r => ({ name: r.name, country: [r.admin1, r.country].filter(Boolean).join(', '), lat: r.latitude, lon: r.longitude, tz: r.timezone }));
-          const seen = new Set(local.map(c => c.name + c.tz));
-          paint(local.concat(remote.filter(r => !seen.has(r.name + r.tz))), false);
+          const remote = (j.results || []).filter(r => r.timezone && r.country_code === 'RU').map(r => ({ name: r.name, country: r.admin1 || 'Россия', lat: r.latitude, lon: r.longitude, tz: r.timezone }));
+          const seen = new Set(local.map(c => norm(c.name)));
+          paint(local.concat(remote.filter(r => !seen.has(norm(r.name)))), false);
         }).catch(() => { if (seq === searchSeq) paint(local, false, true); });
     }, 300);
     function paint(list, loading, offline) {
       box.innerHTML = list.map((c, i) => `<button role="option" data-i="${i}"><b>${esc(c.name)}</b><span>${esc(c.country || '')}</span></button>`).join('')
         + (loading ? '<div class="muted small">Ищу по всему миру…</div>' : '')
-        + (!list.length && !loading ? `<div class="muted small">${offline ? 'Поиск по миру недоступен без сети.' : 'Ничего не найдено.'} Укажите координаты вручную ниже.</div>` : '');
+        + (!list.length && !loading ? `<div class="muted small">${offline ? 'Поиск по миру недоступен без сети.' : 'Нет в списке.'} Выберите ближайший крупный город или укажите координаты вручную ниже.</div>` : '');
       box.querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => { state.data.place = list[+b.dataset.i]; renderWizard(); }));
     }
   }

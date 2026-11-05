@@ -138,3 +138,5 @@ section[id] { scroll-margin-top: calc(60px + env(safe-area-inset-top, 0px)); }
 .qr svg { display: block; width: 100%; height: auto; }
 .url { font-size: .85rem; word-break: break-all; text-align: center; color: var(--muted); }
 .share-grid .wide { grid-column: 1 / -1; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.pchip { font: inherit; font-size: .9rem; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; }
