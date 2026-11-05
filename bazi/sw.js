@@ -1,4 +1,4 @@
-const CACHE = 'bazi-v4';
+const CACHE = 'bazi-v5';
 const FILES = ['./', 'index.html', 'style.css', 'engine.js', 'texts.js', 'cities.js', 'app.js', 'vendor/qrcode.js',
   'manifest.webmanifest', 'icon-180.png', 'icon-512.png', 'fonts/fonts.css', 'fonts/alegreya-cyr.woff2', 'fonts/alegreya-lat.woff2',
   'fonts/golos-cyr.woff2', 'fonts/golos-lat.woff2', 'fonts/notoserifsc-sub.woff2'];

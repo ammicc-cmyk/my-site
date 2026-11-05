@@ -16,6 +16,9 @@
   const HOSTED = !/claude\.ai$|claudeusercontent\.com$/.test(location.hostname) && /^https?:$/.test(location.protocol);
   const APP_URL = location.origin + location.pathname;
   let installEvt = null;
+  // ten-god meaning with the gender-specific line (traditional readings differ for men and women)
+  const tgText = (g, gender) => { const x = T.tenGods[g]; return x.text + (x[gender] ? ' ' + x[gender] : ''); };
+  const shadowOf = (dm, gender) => (gender === 'f' && T.dayMaster[dm].shadowF) || T.dayMaster[dm].shadow;
   const STEPS = ['welcome', 'person', 'date', 'time', 'place'];
   const root = $('#app');
 
@@ -267,7 +270,7 @@
       const fav = c.favorable.includes(B.stemEl(p.stem)), unfav = c.unfavorable.includes(B.stemEl(p.stem));
       return `<div class="year-card">
         <div class="yc-head"><b>${y}</b> ${glyphS(p.stem)}${glyphB(p.branch)} <span class="muted">${stemDesc(p.stem)} ${B.ANIMALS[p.branch]}</span></div>
-        <p><b>${T.tenGods[g].ru}</b> (${T.tenGods[g].han}). ${T.tenGods[g].text}</p>
+        <p><b>${T.tenGods[g].ru}</b> (${T.tenGods[g].han}). ${tgText(g, d.gender)}</p>
         <p class="small">${fav ? '<span class="tag good">благоприятная стихия года</span>' : unfav ? '<span class="tag bad">напряжённая стихия года</span>' : '<span class="tag">нейтральная стихия года</span>'}
         ${clashes.length ? `<span class="tag bad">столкновение со столпом: ${clashes.join(', ')}</span>` : ''}
         ${combos.length ? `<span class="tag good">союз со столпом: ${combos.join(', ')}</span>` : ''}</p>
@@ -340,11 +343,11 @@
         <h2>Господин дня <span class="han">日主</span></h2>
         <div class="dm-row">${glyphS(dm, true)}<div><b>${B.STEM_RU[dm]}, ${stemDesc(dm)}</b><br><span class="muted">Образ: ${dmT.img}</span></div></div>
         <p>${dmT.text}</p>
-        <p><b>Тень:</b> ${dmT.shadow}</p>
+        <p><b>Тень:</b> ${shadowOf(dm, d.gender)}</p>
         <h3>Структура месяца</h3>
-        <p>Главная энергия месяца рождения для вас — <b>${T.tenGods[monthMainGod].ru}</b> (${T.tenGods[monthMainGod].han}). ${T.tenGods[monthMainGod].text}</p>
+        <p>Главная энергия месяца рождения для вас — <b>${T.tenGods[monthMainGod].ru}</b> (${T.tenGods[monthMainGod].han}). ${tgText(monthMainGod, d.gender)}</p>
         <h3>Ведущие энергии карты</h3>
-        <ul class="list">${tgSorted.slice(0, 3).map(([g]) => `<li><b>${T.tenGods[g].ru}</b> <span class="han">${T.tenGods[g].han}</span>, группа «${T.tenGods[g].group}». ${T.tenGods[g].text}</li>`).join('')}</ul>
+        <ul class="list">${tgSorted.slice(0, 3).map(([g]) => `<li><b>${T.tenGods[g].ru}</b> <span class="han">${T.tenGods[g].han}</span>, группа «${T.tenGods[g].group}». ${tgText(g, d.gender)}</li>`).join('')}</ul>
         ${missing.length ? `<p class="small">В карте не выражены группы: <b>${missing.join(', ')}</b>. Эти темы даются через усилие или приходят с тактами удачи.</p>` : ''}
       </section>
 
@@ -481,7 +484,7 @@
     const nowY = B.currentSolarYear(Date.now());
     return {
       dm, el: `${B.isYang(dm) ? 'Ян' : 'Инь'}-${B.ELEMENTS[B.stemEl(dm)]}`, img: T.dayMaster[dm].img.toLowerCase(),
-      trait: T.dayMaster[dm].text, shadow: T.dayMaster[dm].shadow, short: T.dayMaster[dm].short,
+      trait: T.dayMaster[dm].text, shadow: shadowOf(dm, d.gender), short: T.dayMaster[dm].short,
       most: order[0][1], least: order[4][1], pct: e => Math.round(c.score[e] / tot * 100),
       fav: c.favorable, cur: c.luck.find(l => ageNow >= l.age && ageNow < l.age + 10),
       kua, dirs: B.KUA_DIRS[kua], east: [1, 3, 4, 9].includes(kua), nowY, yp: B.yearPillar(nowY),
@@ -489,7 +492,7 @@
     };
   }
   function summary(d, c) {
-    const f = plainFacts(d, c), G = g => T.tenGods[B.tenGod(f.dm, g)];
+    const f = plainFacts(d, c), G = st => ({ text: tgText(B.tenGod(f.dm, st), d.gender) });
     const pil = c.pillars.slice().reverse().map(x => x.p ? B.STEMS[x.p.stem] + B.BRANCHES[x.p.branch] : '??');
     const favColors = f.fav.slice(0, 2).map(e => T.elements[e].colors).join(', ');
     const favCareer = f.fav.slice(0, 2).map(e => T.elements[e].career).join('; ');
