@@ -13,6 +13,9 @@
 
   let state = { step: 0, data: { name: '', gender: '', date: '', time: '', timeUnknown: false, place: null, ziRule: '23' } };
 
+  const HOSTED = !/claude\.ai$|claudeusercontent\.com$/.test(location.hostname) && /^https?:$/.test(location.protocol);
+  const APP_URL = location.origin + location.pathname;
+  let installEvt = null;
   const STEPS = ['welcome', 'person', 'date', 'time', 'place'];
   const root = $('#app');
 
@@ -32,7 +35,9 @@
         <div class="stack">
           <button class="btn primary" id="go">Начать</button>
           <button class="btn ghost" id="demo">Посмотреть пример</button>
+          ${HOSTED ? '<button class="btn ghost" id="shareApp">Поделиться приложением</button>' : ''}
         </div>
+        ${HOSTED ? `<p class="tiny muted offline-note">${navigator.serviceWorker && navigator.serviceWorker.controller ? 'Сохранено на устройстве: работает без интернета.' : 'После первого открытия приложение будет работать без интернета.'}</p>` : ''}
         ${saved.length ? `<div class="saved"><h3>Сохранённые</h3>${saved.map((p, i) => `
           <div class="saved-row"><button class="link" data-open="${i}">${esc(p.name || 'Без имени')} · ${esc(p.date.split('-').reverse().join('.'))}</button>
           <button class="icon-btn" data-del="${i}" aria-label="Удалить">×</button></div>`).join('')}</div>` : ''}`;
@@ -99,6 +104,7 @@
     const d = state.data;
     const on = (sel, ev, fn) => { const el = $(sel); if (el) el.addEventListener(ev, fn); };
     on('#go', 'click', () => { state.step = 1; renderWizard(); });
+    on('#shareApp', 'click', renderShareApp);
     on('#demo', 'click', () => showResult({ name: 'Пример', gender: 'f', date: '1990-08-15', time: '09:30', timeUnknown: false, ziRule: '23',
       place: { name: 'Москва', country: 'Россия', lon: 37.6173, lat: 55.7558, tz: 'Europe/Moscow' } }, false));
     root.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => showResult(store.get('bazi.profiles', [])[+b.dataset.open], false)));
@@ -157,17 +163,19 @@
       lon: p.lon, tz: p.tz || null, utcOffsetMin: p.tz ? 0 : Math.round(p.offset * 60), ziRule: d.ziRule || '23' };
   }
 
-  let current = null;
-  function showResult(d, save) {
+  let current = null, lastChart = null;
+  function showResult(d, save, shared) {
     if (save) {
       const list = store.get('bazi.profiles', []).filter(p => !(p.name === d.name && p.date === d.date && p.time === d.time));
       list.unshift(d); store.set('bazi.profiles', list.slice(0, 12));
     }
     current = d;
     const c = B.computeChart(buildInput(d));
-    root.innerHTML = renderResult(d, c);
+    root.innerHTML = renderResult(d, c, shared);
+    lastChart = c;
     window.scrollTo(0, 0);
-    $('#again').addEventListener('click', () => { state = { step: 0, data: { name: '', gender: '', date: '', time: '', timeUnknown: false, place: null, ziRule: '23' } }; renderWizard(); window.scrollTo(0, 0); });
+    bindShare(d, c);
+    $('#again').addEventListener('click', () => { clearHash(); state = { step: 0, data: { name: '', gender: '', date: '', time: '', timeUnknown: false, place: null, ziRule: '23' } }; renderWizard(); window.scrollTo(0, 0); });
     root.querySelectorAll('[data-zi]').forEach(b => b.addEventListener('click', () => { current.ziRule = b.dataset.zi; showResult(current, false); }));
     root.querySelectorAll('.tabs a').forEach(a => a.addEventListener('click', e => {
       e.preventDefault(); const t = document.getElementById(a.dataset.t); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -180,7 +188,7 @@
   const elName = e => `<span class="chip el-${EL_CLASS[e]}">${B.ELEMENTS[e]}</span>`;
   const stemDesc = s => `${B.isYang(s) ? 'Ян' : 'Инь'}-${B.ELEMENTS[B.stemEl(s)]}`;
 
-  function renderResult(d, c) {
+  function renderResult(d, c, shared) {
     const dm = c.dm, dmT = T.dayMaster[dm];
     const known = !d.timeUnknown;
     const now = Date.now();
@@ -303,9 +311,10 @@
       <p class="muted">${bdate}${known ? ', ' + d.time : ', время неизвестно'} · ${esc(d.place.name)} · ${d.gender === 'f' ? 'жен.' : 'муж.'}</p></div>
       <button class="btn ghost small" id="again">Новый расчёт</button>
     </header>
+    ${shared ? `<div class="banner">Эту карту вам отправили по ссылке. <button class="link accent" id="saveShared">Сохранить на этом устройстве</button></div>` : ''}
     <nav class="tabs" aria-label="Разделы">
       <a href="#s-pillars" data-t="s-pillars">Столпы</a><a href="#s-dm" data-t="s-dm">Я</a><a href="#s-el" data-t="s-el">Стихии</a>
-      <a href="#s-luck" data-t="s-luck">Удача</a><a href="#s-year" data-t="s-year">Год</a><a href="#s-fs" data-t="s-fs">Фэншуй</a>
+      <a href="#s-luck" data-t="s-luck">Удача</a><a href="#s-year" data-t="s-year">Год</a><a href="#s-fs" data-t="s-fs">Фэншуй</a><a href="#s-share" data-t="s-share">Отправить</a>
     </nav>
     <main class="results">
       <section id="s-pillars" class="card">
@@ -377,6 +386,18 @@
         <ul class="list">${flyList}</ul>
       </section>
 
+      <section id="s-share" class="card share">
+        <h2>Отправить результат</h2>
+        <p class="small muted">Картинка и текст уходят через системное меню «Поделиться»: Telegram, MAX, WhatsApp, почта${HOSTED ? '. В тексте будет ссылка, по которой получатель откроет полную карту' : ''}.</p>
+        <div class="share-grid">
+          <button class="btn primary" id="shImg">Картинкой</button>
+          <button class="btn ghost" id="shText">Текстом</button>
+          <a class="btn ghost" id="shTg" href="#" target="_blank" rel="noopener">Telegram</a>
+          <button class="btn ghost" id="shCopy">Скопировать</button>
+        </div>
+        <p class="tiny muted" id="shStatus" role="status"></p>
+      </section>
+
       <section class="card tech">
         <h2>Детали расчёта</h2>
         <dl>
@@ -395,8 +416,202 @@
     </main>`;
   }
 
-  renderWizard();
-  if ('serviceWorker' in navigator && location.protocol === 'https:' && !location.hostname.endsWith('claude.ai') && !location.hostname.endsWith('claudeusercontent.com')) {
+  const fromHash = decodeChart(location.hash);
+  if (fromHash) showResult(fromHash, false, true); else renderWizard();
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; });
+  window.addEventListener('hashchange', () => { const h = decodeChart(location.hash); if (h) showResult(h, false, true); });
+  if ('serviceWorker' in navigator && HOSTED && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
+
+
+  // ---------- share links ----------
+  function encodeChart(d) {
+    const p = d.place;
+    const o = { n: d.name || '', g: d.gender, d: d.date, t: d.timeUnknown ? '' : d.time, z: d.ziRule === '00' ? 0 : 1,
+      p: p.manual ? [p.name, '', 0, +p.lon.toFixed(3), '', p.offset] : [p.name, p.country || '', +(p.lat || 0).toFixed(3), +p.lon.toFixed(3), p.tz] };
+    const bytes = new TextEncoder().encode(JSON.stringify(o));
+    let bin = ''; bytes.forEach(b => bin += String.fromCharCode(b));
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function decodeChart(hash) {
+    const m = /^#c=([A-Za-z0-9_-]+)$/.exec(hash || ''); if (!m) return null;
+    try {
+      const bin = atob(m[1].replace(/-/g, '+').replace(/_/g, '/'));
+      const o = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, ch => ch.charCodeAt(0))));
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(o.d) || !['m', 'f'].includes(o.g) || !Array.isArray(o.p)) return null;
+      const [name, country, lat, lon, tz, offset] = o.p;
+      if (typeof lon !== 'number' || Math.abs(lon) > 180) return null;
+      const place = tz ? { name: String(name), country: String(country), lat, lon, tz: String(tz) } : { name: String(name), lon, offset: +offset, manual: true };
+      if (tz) { try { new Intl.DateTimeFormat('en', { timeZone: place.tz }); } catch (e) { return null; } }
+      return { name: String(o.n || '').slice(0, 60), gender: o.g, date: o.d, time: o.t || '', timeUnknown: !o.t, ziRule: o.z === 0 ? '00' : '23', place };
+    } catch (e) { return null; }
+  }
+  function clearHash() { if (location.hash) history.replaceState(null, '', location.pathname + location.search); }
+  const chartLink = d => APP_URL + '#c=' + encodeChart(d);
+
+  // ---------- summary ----------
+  function summary(d, c) {
+    const dm = c.dm, ageNow = (Date.now() - c.utcMs) / (365.2425 * 864e5);
+    const pil = c.pillars.slice().reverse().map(x => x.p ? B.STEMS[x.p.stem] + B.BRANCHES[x.p.branch] : '??');
+    const cur = c.luck.find(l => ageNow >= l.age && ageNow < l.age + 10);
+    const kua = B.kua(c.solarYear, d.gender), dirs = B.KUA_DIRS[kua];
+    const DIRF = { 'С':'север','СВ':'северо-восток','В':'восток','ЮВ':'юго-восток','Ю':'юг','ЮЗ':'юго-запад','З':'запад','СЗ':'северо-запад' };
+    const nowY = B.currentSolarYear(Date.now()), yp = B.yearPillar(nowY);
+    const lines = [
+      `Ба Цзы${d.name ? ': ' + d.name : ''}`,
+      `${d.date.split('-').reverse().join('.')}${d.timeUnknown ? ', время неизвестно' : ', ' + d.time}, ${d.place.name}`,
+      '',
+      `Столпы (год · месяц · день · час): ${pil.join(' · ')}`,
+      `Господин дня: ${B.STEMS[dm]} ${B.isYang(dm) ? 'Ян' : 'Инь'}-${B.ELEMENTS[B.stemEl(dm)]} (${T.dayMaster[dm].img.toLowerCase()})`,
+      `${T.strength[c.strength].title}. Полезные стихии: ${c.favorable.map(e => B.ELEMENTS[e]).join(', ')}`,
+      `Знак года: ${B.ANIMALS[c.pillars[3].p.branch]}`,
+      cur ? `Текущий такт удачи: ${B.STEMS[cur.p.stem]}${B.BRANCHES[cur.p.branch]}, ${T.tenGods[B.tenGod(dm, cur.p.stem)].ru} (${Math.floor(cur.age)}–${Math.floor(cur.age) + 9} лет)` : '',
+      `${nowY} год ${B.STEMS[yp.stem]}${B.BRANCHES[yp.branch]}: ${T.tenGods[B.tenGod(dm, yp.stem)].ru}`,
+      '',
+      `Фэншуй: число Гуа ${kua}, ${[1,3,4,9].includes(kua) ? 'восточная' : 'западная'} группа`,
+      `Лучшие направления: ${dirs.slice(0, 4).map(x => DIRF[x]).join(', ')}`,
+      `Худшее: ${DIRF[dirs[7]]}`,
+    ].filter((x, i, a) => x !== '' || a[i - 1] !== '');
+    return lines.join('\n');
+  }
+
+  // ---------- image card ----------
+  async function renderCard(d, c) {
+    const W = 1080, H = 1350, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const x = cv.getContext('2d');
+    try { await Promise.all(['500 80px "Noto Serif SC"', '700 60px Alegreya', '400 30px "Golos Text"', '600 30px "Golos Text"'].map(f => document.fonts.load(f, f.includes('SC') ? '甲子' : 'Аа'))); } catch (e) {}
+    const C = { bg: '#eef0ea', card: '#fbfbf8', fg: '#1d2421', muted: '#5f6a64', line: '#d7dbd2', accent: '#a8322a', el: ['#2f7d4f', '#c13a28', '#9a7428', '#6c7480', '#245a8c'] };
+    const HAN = '"Noto Serif SC", "Songti SC", "Noto Serif CJK SC", serif', DISP = 'Alegreya, Georgia, serif', BODY = '"Golos Text", -apple-system, Roboto, sans-serif';
+    x.fillStyle = C.bg; x.fillRect(0, 0, W, H);
+    x.fillStyle = C.accent; x.fillRect(0, 0, W, 14);
+    x.fillStyle = C.fg; x.font = `700 64px ${DISP}`; x.textBaseline = 'alphabetic';
+    x.fillText(d.name || 'Карта Ба Цзы', 70, 130);
+    x.fillStyle = C.muted; x.font = `400 32px ${BODY}`;
+    x.fillText(`${d.date.split('-').reverse().join('.')}${d.timeUnknown ? ', время неизвестно' : ', ' + d.time} · ${d.place.name}`, 70, 182);
+    // pillars
+    const cols = c.pillars, cw = 220, gap = 20, x0 = (W - (cw * 4 + gap * 3)) / 2, y0 = 230;
+    cols.forEach(({ key, label, p }, i) => {
+      const cx = x0 + i * (cw + gap);
+      x.fillStyle = C.card; roundRect(x, cx, y0, cw, 470, 24); x.fill();
+      if (key === 'day') { x.strokeStyle = C.accent; x.lineWidth = 5; roundRect(x, cx, y0, cw, 470, 24); x.stroke(); }
+      x.textAlign = 'center'; x.fillStyle = C.muted; x.font = `600 26px ${BODY}`;
+      x.fillText(label.toUpperCase(), cx + cw / 2, y0 + 50);
+      if (!p) { x.fillStyle = C.line; x.font = `400 120px ${DISP}`; x.fillText('?', cx + cw / 2, y0 + 300); return; }
+      x.fillStyle = C.fg; x.font = `400 24px ${BODY}`;
+      const lab = key === 'day' ? 'Господин дня' : T.tenGods[B.tenGod(c.dm, p.stem)].ru;
+      for (let fs = 24; fs > 15 && x.measureText(lab).width > cw - 20; fs--) x.font = `400 ${fs - 1}px ${BODY}`;
+      x.fillText(lab, cx + cw / 2, y0 + 92);
+      x.font = `500 136px ${HAN}`;
+      x.fillStyle = C.el[B.stemEl(p.stem)]; x.fillText(B.STEMS[p.stem], cx + cw / 2, y0 + 245);
+      x.fillStyle = C.el[B.BRANCH_EL[p.branch]]; x.fillText(B.BRANCHES[p.branch], cx + cw / 2, y0 + 405);
+      x.fillStyle = C.muted; x.font = `400 24px ${BODY}`;
+      x.fillText(B.ANIMALS[p.branch], cx + cw / 2, y0 + 448);
+    });
+    x.textAlign = 'left';
+    // day master + elements
+    let y = 780; const dm = c.dm;
+    x.fillStyle = C.fg; x.font = `700 44px ${DISP}`;
+    x.fillText(`${B.isYang(dm) ? 'Ян' : 'Инь'}-${B.ELEMENTS[B.stemEl(dm)]}: ${T.dayMaster[dm].img.toLowerCase()}`, 70, y);
+    x.fillStyle = C.muted; x.font = `400 30px ${BODY}`;
+    x.fillText(`${T.strength[c.strength].title}. Полезно: ${c.favorable.map(e => B.ELEMENTS[e].toLowerCase()).join(', ')}`, 70, y + 50);
+    const tot = c.score.reduce((a, b) => a + b, 0), mx = Math.max(...c.score);
+    c.score.forEach((v, e) => {
+      const by = 880 + e * 52;
+      x.fillStyle = C.fg; x.font = `400 28px ${BODY}`; x.fillText(B.ELEMENTS[e], 70, by + 24);
+      x.fillStyle = C.line; roundRect(x, 260, by, 640, 26, 13); x.fill();
+      x.fillStyle = C.el[e]; roundRect(x, 260, by, Math.max(26, 640 * v / mx), 26, 13); x.fill();
+      x.fillStyle = C.muted; x.textAlign = 'right'; x.fillText(Math.round(v / tot * 100) + '%', 1010, by + 24); x.textAlign = 'left';
+    });
+    // kua
+    const kua = B.kua(c.solarYear, d.gender), dirs = B.KUA_DIRS[kua];
+    y = 1180;
+    x.fillStyle = C.accent; x.beginPath(); x.arc(115, y, 45, 0, Math.PI * 2); x.fill();
+    x.fillStyle = '#fff'; x.font = `700 54px ${DISP}`; x.textAlign = 'center'; x.fillText(String(kua), 115, y + 18); x.textAlign = 'left';
+    x.fillStyle = C.fg; x.font = `600 32px ${BODY}`; x.fillText(`Число Гуа ${kua}, ${[1,3,4,9].includes(kua) ? 'восточная' : 'западная'} группа`, 185, y - 8);
+    x.fillStyle = C.muted; x.font = `400 28px ${BODY}`; x.fillText(`Лучшие направления: ${dirs.slice(0, 4).join(', ')}`, 185, y + 34);
+    x.fillStyle = C.muted; x.font = `400 24px ${BODY}`;
+    x.fillText(HOSTED ? APP_URL.replace(/^https?:\/\//, '') : 'Ба Цзы и фэншуй', 70, H - 40);
+    return new Promise(r => cv.toBlob(r, 'image/png'));
+  }
+  function roundRect(x, a, b, w, h, r) { x.beginPath(); x.moveTo(a + r, b); x.arcTo(a + w, b, a + w, b + h, r); x.arcTo(a + w, b + h, a, b + h, r); x.arcTo(a, b + h, a, b, r); x.arcTo(a, b, a + w, b, r); x.closePath(); }
+
+  // ---------- share actions ----------
+  async function copyText(t) {
+    try { await navigator.clipboard.writeText(t); return true; } catch (e) {
+      const ta = document.createElement('textarea'); ta.value = t; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select(); let ok = false; try { ok = document.execCommand('copy'); } catch (e2) {} ta.remove(); return ok;
+    }
+  }
+  function bindShare(d, c) {
+    const status = $('#shStatus'), say = t => { if (status) status.textContent = t; };
+    const link = HOSTED ? chartLink(d) : '';
+    const text = summary(d, c);
+    const full = link ? text + '\n\nПолная карта: ' + link : text;
+    const tg = $('#shTg');
+    if (tg) {
+      if (link) tg.href = 'https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent(text);
+      else tg.href = 'https://t.me/share/url?url=' + encodeURIComponent('Ба Цзы') + '&text=' + encodeURIComponent(text);
+    }
+    const saveBtn = $('#saveShared');
+    if (saveBtn) saveBtn.addEventListener('click', () => {
+      const list = store.get('bazi.profiles', []).filter(p => !(p.name === d.name && p.date === d.date && p.time === d.time));
+      list.unshift(d); store.set('bazi.profiles', list.slice(0, 12)); saveBtn.parentElement.textContent = 'Сохранено. Карта появится в списке на главном экране.';
+    });
+    $('#shText').addEventListener('click', async () => {
+      if (navigator.share) {
+        try { await navigator.share(link ? { title: 'Ба Цзы', text: text + '\n\nПолная карта:', url: link } : { title: 'Ба Цзы', text }); say(''); return; }
+        catch (e) { if (e && e.name === 'AbortError') return; }
+      }
+      say(await copyText(full) ? 'Текст скопирован. Вставьте его в чат.' : 'Не удалось скопировать.');
+    });
+    $('#shCopy').addEventListener('click', async () => say(await copyText(full) ? 'Текст и ссылка скопированы. Вставьте в Telegram, MAX или любой чат.' : 'Не удалось скопировать.'));
+    $('#shImg').addEventListener('click', async () => {
+      say('Готовлю картинку…');
+      const blob = await renderCard(d, c);
+      if (!blob) { say('Не удалось создать картинку.'); return; }
+      const file = new File([blob], `bazi-${d.date}.png`, { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try { await navigator.share(link ? { files: [file], text: 'Моя карта Ба Цзы: ' + link } : { files: [file] }); say(''); return; }
+        catch (e) { if (e && e.name === 'AbortError') { say(''); return; } }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      say('Картинка сохранена. Отправьте её из галереи или «Файлов».');
+    });
+  }
+
+  // ---------- share the app ----------
+  function renderShareApp() {
+    const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    let qr = '';
+    try { const q = qrcode(0, 'M'); q.addData(APP_URL); q.make(); qr = q.createSvgTag({ cellSize: 6, margin: 2, scalable: true }); } catch (e) {}
+    const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+    root.innerHTML = `<main class="wizard"><section class="card step">
+      <h2>Поделиться приложением</h2>
+      <p class="hint">Отправьте ссылку или дайте отсканировать QR-код камерой. Работает на iPhone и Android, устанавливать ничего не нужно.</p>
+      <div class="qr" aria-label="QR-код ссылки на приложение">${qr}</div>
+      <p class="url">${esc(APP_URL)}</p>
+      <div class="share-grid">
+        <button class="btn primary" id="saShare">Отправить ссылку</button>
+        <a class="btn ghost" target="_blank" rel="noopener" href="https://t.me/share/url?url=${encodeURIComponent(APP_URL)}&text=${encodeURIComponent('Ба Цзы и фэншуй: карта по дате рождения')}">Telegram</a>
+        <button class="btn ghost wide" id="saCopy">Скопировать ссылку</button>
+      </div>
+      <p class="tiny muted" id="saStatus" role="status"></p>
+      ${standalone ? '' : `<h3>Добавить на экран «Домой»</h3>
+      ${isIOS ? '<p class="small">В Safari нажмите «Поделиться» (квадрат со стрелкой) → «На экран „Домой“». Приложение появится с иконкой и будет работать без интернета.</p>'
+        : `<p class="small">В Chrome откройте меню ⋮ → «Установить приложение» или «Добавить на главный экран».</p>${installEvt ? '<button class="btn ghost" id="saInstall">Установить</button>' : ''}`}`}
+      </section><div class="nav"><button class="btn ghost" id="back" style="grid-column: 1 / -1">Назад</button></div></main>`;
+    const say = t => $('#saStatus').textContent = t;
+    $('#back').addEventListener('click', renderWizard);
+    $('#saCopy').addEventListener('click', async () => say(await copyText(APP_URL) ? 'Ссылка скопирована.' : 'Не удалось скопировать.'));
+    $('#saShare').addEventListener('click', async () => {
+      if (navigator.share) { try { await navigator.share({ title: 'Ба Цзы и фэншуй', text: 'Карта Ба Цзы и фэншуй по дате рождения', url: APP_URL }); return; } catch (e) { if (e.name === 'AbortError') return; } }
+      say(await copyText(APP_URL) ? 'Ссылка скопирована.' : 'Не удалось скопировать.');
+    });
+    const ib = $('#saInstall'); if (ib) ib.addEventListener('click', async () => { installEvt.prompt(); await installEvt.userChoice; installEvt = null; ib.remove(); });
+    window.scrollTo(0, 0);
+  }
+
 })();
